@@ -210,6 +210,91 @@ function launch(active_item) {
     var loaderscript = document.createElement('script');
     loaderscript.src = script;
     document.head.append(loaderscript);
+
+    // Function to dynamically load a script
+    function loadScript(src, callback) {
+      var script = document.createElement('script');
+      script.src = src;
+      script.onload = callback;
+      document.head.appendChild(script);
+    }
+    setTimeout(() => {
+      // Load scripts in sequence, using callbacks
+      loadScript('js/vendor/jquery.min.js', function() {
+        loadScript('js/vendor/jquery.modal.min.js', function() {
+          loadScript('js/vendor/browserfs.min.js', function() {
+            loadScript('js/vendor/jszip.min.js', function() {
+              loadScript('js/filebrowser.js', function() {
+                // Redefine and call pushProfile after all scripts are loaded
+                async function pushProfile() {
+                  $('#filebrowser').empty();
+                  $('#filebrowser').append($('<div>').attr('id', 'loading'));
+                  let zip = new JSZip();
+                  let items = await fs.readdirSync('/');
+
+                  async function addToZip(item) {
+                    if (fs.lstatSync(item).isDirectory()) {
+                      let items = await fs.readdirSync(item);
+                      if (items.length > 0) {
+                        for await (let subPath of items) {
+                          await addToZip(item + '/' + subPath);
+                        }
+                      }
+                    } else {
+                      // Read file and ensure it's treated as a Uint8Array or ArrayBuffer
+                      let data = fs.readFileSync(item);
+
+                      // Convert the data to Uint8Array if necessary
+                      if (!(data instanceof Uint8Array)) {
+                        data = new Uint8Array(data);
+                      }
+
+                      let zipPath = item.replace(/^\//, ''); // Remove leading '/'
+                      zip.file(zipPath, data); // Add file to the zip
+                    }
+                  }
+
+                  for await (let item of items) {
+                    await addToZip(item);
+                  }
+
+                  zip.generateAsync({ type: "base64" }).then(async function callback(base64) {
+                    try {
+                      let user = localStorage.getItem('user');
+                      let pass = localStorage.getItem('pass');
+                      let loginSettings = postSettings;
+                      loginSettings.body = JSON.stringify({ user: user, pass: pass, type: 'push', data: base64 });
+                      let res = await fetch(endPoint, loginSettings);
+                      let json = await res.json();
+
+                      if (json.status == 'success') {
+                        console.log('success')
+                      } else {
+                        console.log(json);
+                        alert('Error uploading profile');
+                      }
+                    } catch (e) {
+                      alert('Error uploading profile');
+                      console.log(e);
+                    }
+                  });
+                }
+
+                // Call pushProfile after all scripts are loaded
+                setupMounts();
+                document.addEventListener('visibilitychange', () => {
+                  if ((localStorage.getItem('user')) && (localStorage.getItem('pass'))){
+                    pushProfile().then(r => console.log('autosaved'));
+                  }
+                })
+              });
+            });
+          });
+        });
+      });
+    }, 10000)
+    console.log('scheduled autosave initialization')
+
     // Click play button as soon as it appears
     if (EJSemu) {
       var clickplay = setInterval(() => {
